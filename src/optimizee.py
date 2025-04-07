@@ -12,7 +12,7 @@ class Optimizee:
         """
         Initialize the optimization problem.
         """
-        pass
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     def set_params(self, params=None):
         """
@@ -104,3 +104,93 @@ class QuadraticOptimizee(Optimizee):
         Returns all parameters of the optimizee, as a tensor of shape (d,1).
         """
         return self.theta
+    
+class XYNNOptimizee(Optimizee):
+    """
+    Class for a generic linear neural network optimizee.
+    """
+    def __init__(self, X, y, hidden_size=20, num_layers=2, num_samples=10, loss_fn=nn.MSELoss(), activation_fn=nn.ReLU()):
+        """
+        """
+        super().__init__()
+        self.X = torch.tensor(X, dtype=torch.float32, device=self.device)
+        self.y = torch.tensor(y, dtype=torch.float32, device=self.device)
+
+        self.input_size = X.shape[1]
+        self.hidden_size = hidden_size
+        try:
+          self.output_size = y.shape[1]
+        except:
+          self.output_size = 1
+
+        self.num_layers = num_layers
+        self.num_samples = num_samples
+        self.loss_fn = loss_fn.to(self.device)
+        self.activation_fn = activation_fn.to(self.device)
+        self.model = []
+        for i in range(num_layers):
+            if num_layers == 1:
+                W = torch.randn(self.input_size+1, self.output_size, requires_grad=True, device=self.device)
+            elif i == 0:
+                W = torch.randn(self.input_size+1, self.hidden_size, requires_grad=True, device=self.device)
+            elif i == num_layers - 1:
+                W = torch.randn(self.hidden_size+1, self.output_size, requires_grad=True, device=self.device)
+            else:
+                W = torch.randn(self.hidden_size+1, self.hidden_size, requires_grad=True, device=self.device)
+            self.model.append(W)
+    
+    
+    def set_params(self, params=None):
+        """
+        Given a tensor of shape (d,1), sets the parameters of the optimizee.
+        """
+        if params is not None:
+            params = torch.flatten(params).to(self.device)
+            for i in range(self.num_layers):
+                current_param = self.model[i]
+                in_size, out_size = current_param.shape
+                new_param = params[:in_size*out_size].reshape(in_size, out_size)
+                params = params[in_size*out_size:]
+                self.model[i] = new_param.to(self.device)
+
+    def forward(self, x):
+        """
+        Forward pass of the linear neural network.
+        """
+        x = x.to(self.device).flatten(start_dim=1)  # Flatten the input
+        ones = torch.ones(x.shape[0], 1, device=self.device)  # Create a column of ones
+        for i in range(self.num_layers):
+            W = self.model[i]
+            x = torch.cat((x, ones), dim=1)
+            x = x @ W
+            x = self.activation_fn(x) if i < self.num_layers - 1 else x
+        return x
+
+    def compute_loss(self, params, return_grad=True):
+        self.set_params(params)  # Set model parameters
+        total_loss = None
+        
+        indices = torch.randint(0, self.X.shape[0], (self.num_samples,), device=self.X.device)
+        inputs = self.X[indices]
+        targets = self.y[indices].squeeze()
+
+        outputs = self.forward(inputs).squeeze()
+
+        if self.output_size > 1:
+              targets = nn.functional.one_hot(targets, num_classes=self.output_size).float().to(self.device)
+
+        total_loss = self.loss_fn(outputs, targets)
+
+        if return_grad:
+            grads = torch.autograd.grad(total_loss, self.model, create_graph=True)
+            grads = torch.cat([g.flatten() for g in grads]).unsqueeze(-1)
+            return total_loss, grads.detach()
+        else:
+            return total_loss
+
+    
+    def all_parameters(self):
+        """
+        Returns all parameters of the optimizee, as a tensor of shape (d,1).
+        """
+        return torch.cat([p.flatten() for p in self.model]).unsqueeze(-1).to(self.device)
