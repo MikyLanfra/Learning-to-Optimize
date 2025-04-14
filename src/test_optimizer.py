@@ -1,7 +1,7 @@
 import torch
 from tqdm.notebook import tqdm
 
-def test_optimzier(optimizer_cls, optimizee, optimizer_kwargs={}, time_horizon=200, writer=None):
+def test_optimizer(optimizer_cls, optimizee, optimizer_kwargs={}, time_horizon=200, writer=None):
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 

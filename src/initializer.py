@@ -1,8 +1,10 @@
 import itertools
+import torch
+from torch.distributions import Dirichlet
 from functools import reduce
 import operator
 
-class Initializer():
+class Param_Initializer():
 
     def __init__(self, optimizee_class, optimizee_kwargs:dict[str, list]={}):
         self.cls = optimizee_class
@@ -49,3 +51,52 @@ class Initializer():
         if not self.attr:
             return 0
         return reduce(operator.mul, (len(v) for v in self.attr.values()), 1)      
+    
+
+
+class Data_Initializer():
+
+    def __init__(self, optimizee_class,optimizee_kwargs:dict[str,list]={}, distribution=Dirichlet(torch.tensor([1.0, 1.0])),num_optims:int=1, subset_size:int=1):
+        self.cls = optimizee_class
+        self.optims = []
+        self.num_optims = num_optims
+        self.attr = optimizee_kwargs
+        self.distribution = distribution
+        self.subset_size = subset_size
+
+    def get_data(self, X, y):
+        """
+        Sets the data for the optimizee class.
+
+        Args:
+            X (torch.Tensor): Input data.
+            y (torch.Tensor): Output data.
+        """
+        self.X = X
+        self.y = y
+
+    def initialize(self):
+        if "X" not in self.attr.keys():
+            raise ValueError("X is not in the attributes of the optimizee class")
+        else:
+            self.X = self.attr["X"]
+            self.y = self.attr["y"]
+            max_val = self.attr["X"].shape[0]
+            self.attr.pop("X")
+            self.attr.pop("y")
+
+        for i in range(self.num_optims):
+            indexes = self.distribution.sample((self.subset_size,))[0]
+            indexes = indexes * max_val
+            indexes = indexes.long().numpy()
+            params = self.attr.copy()
+            params["X"] = self.X[indexes]
+            params["y"] = self.y[indexes]
+            self.optims.append(self.cls(**params))
+        return self.optims
+    
+    def get_num_optims(self):
+        return self.num_optims
+
+    
+        

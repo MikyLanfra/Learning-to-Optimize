@@ -21,27 +21,18 @@ class LSTMConcurrent(nn.Module):
 
     def forward(self, x, hidden_state):
         """
-        Forward pass of the LSTM optimizer.
-
-        Args:
-            x (torch.Tensor): Input tensor of shape (batch_size, sequence_length, input_size).
-            hidden_state (tuple): Hidden state of the LSTM (h, c).
-
-        Returns:
-            torch.Tensor: Output updates of shape (batch_size, sequence_length, 1).
-            tuple: Updated hidden state.
+        x: (num_params, 1, input_size)
+        hidden_state: tuple of (h, c) with shape (num_layers, num_params, hidden_size)
         """
         x = x.to(self.device)
-        hidden_state = tuple(h.to(self.device) for h in hidden_state)
-
         if self.preproc:
-            x = self.preprocess_gradients(x)
+            x = self.preprocess_gradients(x)  # shape: (num_params, input_size)
+        
+        x = x.unsqueeze(1)  # (num_params, 1, input_size) to match LSTM's (batch, seq_len, input_size)
 
-        out, hidden_state = self.lstm(x, hidden_state)
-        out = self.output_layer(out)
-
-        return out, hidden_state
-
+        out, new_hidden_state = self.lstm(x, hidden_state)  # Efficient batch LSTM call
+        out = self.output_layer(out).squeeze(1)  # (num_params, 1, 1) → (num_params, 1)
+        return out, new_hidden_state
 
     def preprocess_gradients(self, gradients):
         """ Applies log transformation & sign extraction to gradients. """
@@ -69,8 +60,7 @@ class LSTMConcurrent(nn.Module):
         return preprocessed
 
 
-    def initialize_hidden_state(self):
-        # Initialize hidden & cell states for LSTM (one per parameter)
-        h0 = torch.zeros(2, self.hidden_size, device=self.device)
-        c0 = torch.zeros(2, self.hidden_size, device=self.device)
+    def initialize_hidden_state(self, num_params):
+        h0 = torch.zeros(2, num_params, self.hidden_size, device=self.device)
+        c0 = torch.zeros(2, num_params, self.hidden_size, device=self.device)
         return (h0, c0)

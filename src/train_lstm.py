@@ -2,8 +2,7 @@ import torch
 from torch import nn
 from tqdm.notebook import tqdm
 
-
-def train_LSTM(lstm_optimizer, meta_optimizer, initializer, num_epochs=500, time_horizon=200, discount=1, scheduler = None, writer=None):
+def train_LSTM(lstm_optimizer, meta_optimizer, initializer, num_epochs=500, min_horizon=100, max_horizon=200, discount=1, scheduler = None, writer=None):
     
     lstm_optimizer.train()
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -17,8 +16,12 @@ def train_LSTM(lstm_optimizer, meta_optimizer, initializer, num_epochs=500, time
             optimizees = initializer.initialize()
             optimizees[0].set_params()
             params = optimizees[0].all_parameters().to(device)
-            hidden_state = lstm_optimizer.initialize_hidden_state()
+            hidden_state = lstm_optimizer.initialize_hidden_state(params.size(0))
             cumulative_loss = None
+
+            if min_horizon < max_horizon: time_horizon = torch.randint(min_horizon, max_horizon, (1,)).item()
+            else: time_horizon = max_horizon
+            # print(f"Current time horizon: {current_time_horizon}")
             for t in range(time_horizon):
                 gradients = []
                 for i in range(len(optimizees)):
@@ -30,12 +33,12 @@ def train_LSTM(lstm_optimizer, meta_optimizer, initializer, num_epochs=500, time
                     # if writer and i==0 and epoch==1: writer.add_scalar("Grad", grad_params.squeeze().mean(), t)
 
                 grad_params = torch.stack(gradients).T
-                # print(grad_params.shape, len(optimizees))
+                # LSTM gradients
+
                 update, hidden_state = lstm_optimizer(grad_params, hidden_state)
                 params = params + update
                 # if writer and epoch==1: writer.add_scalar("Update", update.mean(), t)
                 optimizees[0].set_params(params)
-
 
             # Backpropagation through time (BPTT)
             if writer: writer.add_scalar("Loss", cumulative_loss, epoch)
@@ -47,12 +50,13 @@ def train_LSTM(lstm_optimizer, meta_optimizer, initializer, num_epochs=500, time
 
             # Update progress bar
             pbar.set_postfix(loss=cumulative_loss.item())
-
+            # print(lstm_optimizer.lstm.weight_ih_l0.grad[:10])
             num_prints = num_epochs // 10
             if (epoch + 1) % num_prints == 0:
                 current_lr = meta_optimizer.param_groups[0]['lr']
                 print(f"Epoch [{epoch+1}/{num_epochs}], Cumulative Loss: {cumulative_loss.item():.4f}, LR: {current_lr:.3e}")
-                print(f"Final parameters: {(params.detach().cpu().numpy().T)[:10]}...")
+                # print(f"Final parameters: {(params.detach().cpu().numpy().T)[:10]}...")
+                
 
     print("\nTraining complete!")
     return lstm_optimizer
@@ -66,7 +70,7 @@ def test_LSTM(lstm_optimizer, initializer, time_horizon=200, writer=None):
     optimizees = initializer.initialize()
     optimizees[0].set_params()
     params = optimizees[0].all_parameters().to(device)
-    hidden_state = lstm_optimizer.initialize_hidden_state()
+    hidden_state = lstm_optimizer.initialize_hidden_state(params.size(0))
 
     for t in range(time_horizon):
         gradients = []
@@ -85,5 +89,5 @@ def test_LSTM(lstm_optimizer, initializer, time_horizon=200, writer=None):
 
     final_loss = optimizees[0].compute_loss(params, return_grad=False)
     print(f"Final Loss: {final_loss}")
-    print(f"Final parameters: {(params.detach().cpu().numpy().T)[:10]}...")
+    # print(f"Final parameters: {(params.detach().cpu().numpy().T)[:10]}...")
     return params 
