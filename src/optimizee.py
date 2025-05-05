@@ -176,9 +176,6 @@ class XYNNOptimizee(Optimizee):
 
         outputs = self.forward(inputs).squeeze()
 
-        if self.output_size > 1:
-              targets = nn.functional.one_hot(targets, num_classes=self.output_size).float().to(self.device)
-
         total_loss = self.loss_fn(outputs, targets)
 
         if return_grad:
@@ -194,3 +191,6 @@ class XYNNOptimizee(Optimizee):
         Returns all parameters of the optimizee, as a tensor of shape (d,1).
         """
         return torch.cat([p.flatten() for p in self.model]).unsqueeze(-1).to(self.device)
+    
+    def oh_labels(self):
+        return self.y.sum(dim=0)>0

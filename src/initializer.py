@@ -63,6 +63,7 @@ class Data_Initializer():
         self.attr = optimizee_kwargs
         self.distribution = distribution
         self.subset_size = subset_size
+        self.indices = []
 
     def get_data(self, X, y):
         """
@@ -72,8 +73,8 @@ class Data_Initializer():
             X (torch.Tensor): Input data.
             y (torch.Tensor): Output data.
         """
-        self.X = X
-        self.y = y
+        self.attr["X"] = X
+        self.attr["y"] = y
 
     def initialize(self):
         if "X" not in self.attr.keys():
@@ -82,16 +83,19 @@ class Data_Initializer():
             self.X = self.attr["X"]
             self.y = self.attr["y"]
             max_val = self.attr["X"].shape[0]
-            self.attr.pop("X")
-            self.attr.pop("y")
 
+        if len(self.indices)==0:
+            for i in range(self.num_optims):
+                indexes = self.distribution.sample((self.subset_size,))[:, 0]
+                indexes = (indexes * max_val).int().numpy()
+                indexes = indexes.tolist()
+                self.indices.append(indexes)
+
+        self.optims = []
         for i in range(self.num_optims):
-            indexes = self.distribution.sample((self.subset_size,))[0]
-            indexes = indexes * max_val
-            indexes = indexes.long().numpy()
             params = self.attr.copy()
-            params["X"] = self.X[indexes]
-            params["y"] = self.y[indexes]
+            params["X"] = self.X[self.indices[i]]
+            params["y"] = self.y[self.indices[i]]
             self.optims.append(self.cls(**params))
         return self.optims
     

@@ -34,8 +34,10 @@ def train_LSTM(lstm_optimizer, meta_optimizer, initializer, num_epochs=500, min_
 
                 grad_params = torch.stack(gradients).T
                 # LSTM gradients
-
+                
+                # print(f"Gradients: {grad_params.shape}")
                 update, hidden_state = lstm_optimizer(grad_params, hidden_state)
+                # print(f"Update: {update.shape}")
                 params = params + update
                 # if writer and epoch==1: writer.add_scalar("Update", update.mean(), t)
                 optimizees[0].set_params(params)
