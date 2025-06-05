@@ -2,6 +2,7 @@ import torch
 import torch.optim as optim
 import numpy as np
 from torch import nn
+from tqdm.notebook import tqdm
 
 
 class Optimizee:
@@ -105,28 +106,48 @@ class QuadraticOptimizee(Optimizee):
         """
         return self.theta
     
+    def train_model(self, optimizer_class, optimizer_kwargs, time_horizon, writer):
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+        self.set_params()
+        params = self.all_parameters().to(device)
+
+        optimizer = optimizer_class([params], **optimizer_kwargs)
+
+        for t in tqdm(range(time_horizon), desc="Training Progress", unit="time step"):
+            loss = self.compute_loss(params, return_grad=False).to(device)
+            if writer: writer.add_scalar("Loss", loss.item(), t)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+        
+        return params
+
 class XYNNOptimizee(Optimizee):
     """
     Class for a generic linear neural network optimizee.
     """
-    def __init__(self, X, y, hidden_size=20, num_layers=2, num_samples=10, loss_fn=nn.MSELoss(), activation_fn=nn.ReLU()):
+    def __init__(self, X, y, hidden_size=20, num_layers=2, num_samples=10, tr_split=0.8, loss_fn=nn.MSELoss(), activation_fn=nn.ReLU()):
         """
         """
         super().__init__()
         self.X = torch.tensor(X, dtype=torch.float32, device=self.device)
         self.y = torch.tensor(y, dtype=torch.float32, device=self.device)
 
+        self.split_tr_ts(tr_split)
+
         self.input_size = X.shape[1]
         self.hidden_size = hidden_size
-        try:
-          self.output_size = y.shape[1]
-        except:
-          self.output_size = 1
+        try: self.output_size = y.shape[1]
+        except: self.output_size = 1
 
         self.num_layers = num_layers
         self.num_samples = num_samples
         self.loss_fn = loss_fn.to(self.device)
         self.activation_fn = activation_fn.to(self.device)
+
+        self.training = True
+
         self.model = []
         for i in range(num_layers):
             if num_layers == 1:
@@ -137,6 +158,7 @@ class XYNNOptimizee(Optimizee):
                 W = torch.randn(self.hidden_size+1, self.output_size, requires_grad=True, device=self.device)
             else:
                 W = torch.randn(self.hidden_size+1, self.hidden_size, requires_grad=True, device=self.device)
+            W.requires_grad = True
             self.model.append(W)
     
     
@@ -167,12 +189,20 @@ class XYNNOptimizee(Optimizee):
         return x
 
     def compute_loss(self, params, return_grad=True):
+
+        if self.training: 
+            X = self.X_tr
+            y = self.y_tr
+        else: 
+            X = self.X_ts
+            y = self.y_ts
+
         self.set_params(params)  # Set model parameters
         total_loss = None
         
-        indices = torch.randint(0, self.X.shape[0], (self.num_samples,), device=self.X.device)
-        inputs = self.X[indices]
-        targets = self.y[indices].squeeze()
+        indices = torch.randint(0, X.shape[0], (self.num_samples,), device=self.X.device)
+        inputs = X[indices]
+        targets = y[indices].squeeze()
 
         outputs = self.forward(inputs).squeeze()
 
@@ -194,3 +224,43 @@ class XYNNOptimizee(Optimizee):
     
     def oh_labels(self):
         return self.y.sum(dim=0)>0
+    
+    def split_tr_ts(self, split_ratio=0.8):
+        N = self.X.shape[0]
+        train_size = int(N * split_ratio)
+        indices = torch.randperm(N)
+        train_indices = indices[:train_size]
+        test_indices = indices[train_size:]
+        self.X_tr = self.X[train_indices]
+        self.X_ts = self.X[test_indices]
+        self.y_tr = self.y[train_indices]
+        self.y_ts = self.y[test_indices]
+
+    def train(self):
+        self.training = True
+        for i in range(self.num_layers):
+            self.model[i].requires_grad = True
+    
+    def eval(self):
+        self.training = False
+        for i in range(self.num_layers):
+            self.model[i].requires_grad = False
+
+
+    def train_model(self, optimizer_class, optimizer_kwargs, time_horizon, writer):
+        """
+        Optimizes the model using the specified optimizer and logs to TensorBoard.
+        """
+        optimizer = optimizer_class(self.model, **optimizer_kwargs)
+
+        for t in tqdm(range(time_horizon), desc="Training Progress", unit="time step"):
+            self.training = True # Set mode for compute_loss to use training data
+            
+            optimizer.zero_grad() # Clear previous gradients from self.model[i].grad
+            train_loss = self.compute_loss(params=None, return_grad=False)
+            train_loss.backward()
+            optimizer.step()
+
+            if writer: writer.add_scalar("Loss", train_loss.item(), t)
+
+        print(f"Final training loss: {train_loss.item()}")
